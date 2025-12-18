@@ -1,5 +1,7 @@
+// Updated for X-Core
 package dev.dev7.example;
 
+import static android.content.Context.RECEIVER_EXPORTED;
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.SERVICE_CONNECTION_STATE_BROADCAST_EXTRA;
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.SERVICE_DOWNLOAD_SPEED_BROADCAST_EXTRA;
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.SERVICE_DOWNLOAD_TRAFFIC_BROADCAST_EXTRA;
@@ -16,14 +18,11 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
-
-import java.util.Objects;
 
 import dev.dev7.lib.v2ray.V2rayController;
 import dev.dev7.lib.v2ray.utils.V2rayConfigs;
@@ -32,7 +31,7 @@ import dev.dev7.lib.v2ray.utils.V2rayConstants;
 public class MainActivity extends AppCompatActivity {
 
     private Button connection;
-    private TextView connection_speed, connection_traffic, connection_time, server_delay, connected_server_delay, connection_mode,core_version;
+    private TextView connection_speed, connection_traffic, connection_time, server_delay, connected_server_delay, connection_mode, core_version;
     private EditText v2ray_config;
     private SharedPreferences sharedPreferences;
     private BroadcastReceiver v2rayBroadCastReceiver;
@@ -73,13 +72,15 @@ public class MainActivity extends AppCompatActivity {
         // Check the connection delay of connected config.
         connected_server_delay.setOnClickListener(view -> {
             connected_server_delay.setText("connected server delay : measuring...");
-            // Don`t forget to do ui jobs in ui thread!
             V2rayController.getConnectedV2rayServerDelay(this, delayResult -> runOnUiThread(() -> connected_server_delay.setText("connected server delay : " + delayResult + "ms")));
         });
         // Another way to check the connection delay of a config without connecting to it.
         server_delay.setOnClickListener(view -> {
             server_delay.setText("server delay : measuring...");
-            new Handler().postDelayed(() -> server_delay.setText("server delay : " + V2rayController.getV2rayServerDelay(v2ray_config.getText().toString()) + "ms"), 200);
+            new Thread(() -> {
+                long delay = V2rayController.getV2rayServerDelay(v2ray_config.getText().toString());
+                runOnUiThread(() -> server_delay.setText("server delay : " + delay + "ms"));
+            }, "offline_delay_thread").start();
         });
 
         connection_mode.setOnClickListener(view -> {
@@ -88,10 +89,13 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // Check connection state when activity launch
-        switch (V2rayController.getConnectionState()) {
+        V2rayConstants.CONNECTION_STATES state = V2rayController.getConnectionState();
+        if (state == null) {
+            state = V2rayConstants.CONNECTION_STATES.DISCONNECTED;
+        }
+        switch (state) {
             case CONNECTED:
                 connection.setText("CONNECTED");
-                // check  connection latency
                 connected_server_delay.callOnClick();
                 break;
             case DISCONNECTED:
@@ -101,6 +105,7 @@ public class MainActivity extends AppCompatActivity {
                 connection.setText("CONNECTING");
                 break;
             default:
+                connection.setText("DISCONNECTED");
                 break;
         }
         //I tested several different ways to send information from the connection process side
@@ -111,23 +116,29 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceive(Context context, Intent intent) {
                 runOnUiThread(() -> {
-                    connection_time.setText("connection time : " + Objects.requireNonNull(intent.getExtras()).getString(SERVICE_DURATION_BROADCAST_EXTRA));
-                    connection_speed.setText("connection speed : " + intent.getExtras().getString(SERVICE_UPLOAD_SPEED_BROADCAST_EXTRA) + " | " + intent.getExtras().getString(SERVICE_DOWNLOAD_SPEED_BROADCAST_EXTRA));
-                    connection_traffic.setText("connection traffic : " + intent.getExtras().getString(SERVICE_UPLOAD_TRAFFIC_BROADCAST_EXTRA) + " | " + intent.getExtras().getString(SERVICE_DOWNLOAD_TRAFFIC_BROADCAST_EXTRA));
+                    if (intent == null || intent.getExtras() == null) {
+                        return;
+                    }
+                    connection_time.setText("connection time : " + intent.getExtras().getString(SERVICE_DURATION_BROADCAST_EXTRA, "00:00:00"));
+                    connection_speed.setText("connection speed : " + intent.getExtras().getString(SERVICE_UPLOAD_SPEED_BROADCAST_EXTRA, "0B/s") + " | " + intent.getExtras().getString(SERVICE_DOWNLOAD_SPEED_BROADCAST_EXTRA, "0B/s"));
+                    connection_traffic.setText("connection traffic : " + intent.getExtras().getString(SERVICE_UPLOAD_TRAFFIC_BROADCAST_EXTRA, "0B") + " | " + intent.getExtras().getString(SERVICE_DOWNLOAD_TRAFFIC_BROADCAST_EXTRA, "0B"));
                     connection_mode.setText("connection mode : " + V2rayConfigs.serviceMode.toString());
-                    switch ((V2rayConstants.CONNECTION_STATES) Objects.requireNonNull(intent.getExtras().getSerializable(SERVICE_CONNECTION_STATE_BROADCAST_EXTRA))) {
-                        case CONNECTED:
-                            connection.setText("CONNECTED");
-                            break;
-                        case DISCONNECTED:
-                            connection.setText("DISCONNECTED");
-                            connected_server_delay.setText("connected server delay : wait for connection");
-                            break;
-                        case CONNECTING:
-                            connection.setText("CONNECTING");
-                            break;
-                        default:
-                            break;
+                    Object stateObj = intent.getExtras().getSerializable(SERVICE_CONNECTION_STATE_BROADCAST_EXTRA);
+                    if (stateObj instanceof V2rayConstants.CONNECTION_STATES) {
+                        switch ((V2rayConstants.CONNECTION_STATES) stateObj) {
+                            case CONNECTED:
+                                connection.setText("CONNECTED");
+                                break;
+                            case DISCONNECTED:
+                                connection.setText("DISCONNECTED");
+                                connected_server_delay.setText("connected server delay : wait for connection");
+                                break;
+                            case CONNECTING:
+                                connection.setText("CONNECTING");
+                                break;
+                            default:
+                                break;
+                        }
                     }
                 });
             }

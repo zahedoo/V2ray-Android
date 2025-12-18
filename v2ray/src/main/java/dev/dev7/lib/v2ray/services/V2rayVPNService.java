@@ -1,5 +1,7 @@
+// Updated for X-Core
 package dev.dev7.lib.v2ray.services;
 
+import static android.content.Context.RECEIVER_EXPORTED;
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA;
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.V2RAY_SERVICE_COMMAND_INTENT;
 
@@ -29,7 +31,6 @@ import dev.dev7.lib.v2ray.interfaces.StateListener;
 import dev.dev7.lib.v2ray.interfaces.Tun2SocksListener;
 import dev.dev7.lib.v2ray.model.V2rayConfigModel;
 import dev.dev7.lib.v2ray.utils.V2rayConstants;
-
 import dev.dev7.lib.v2ray.interfaces.V2rayServicesListener;
 
 public class V2rayVPNService extends VpnService implements V2rayServicesListener, Tun2SocksListener {
@@ -47,7 +48,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
         @Override
         public void onReceive(Context context, Intent intent) {
             try {
-                V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+                V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveServiceCommand(intent);
                 if (serviceCommand == null) {
                     return;
                 }
@@ -121,7 +122,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
-            V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2RAY_SERVICE_COMMAND_EXTRA);
+            V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveServiceCommand(intent);
             if (serviceCommand == null) {
                 return super.onStartCommand(intent, flags, startId);
             }
@@ -135,6 +136,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
                         stopService();
                         break;
                     }
+                    connectionState = V2rayConstants.CONNECTION_STATES.CONNECTING;
                     staticsBroadCastService.isTrafficStaticsEnabled = currentConfig.enableTrafficStatics;
                     if (currentConfig.enableTrafficStatics && currentConfig.enableTrafficStaticsOnNotification) {
                         staticsBroadCastService.trafficListener = notificationService.trafficListener;
@@ -258,7 +260,9 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
 
     @Override
     public void onDestroy() {
-        unregisterReceiver(serviceCommandBroadcastReceiver);
+        try {
+            unregisterReceiver(serviceCommandBroadcastReceiver);
+        } catch (Exception ignore) {}
         super.onDestroy();
     }
 
@@ -291,6 +295,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
             } catch (Exception ignore) {
 
             }
+            connectionState = V2rayConstants.CONNECTION_STATES.DISCONNECTED;
         } catch (Exception e) {
             Log.d(V2rayVPNService.class.getSimpleName(), "stopService => ", e);
         }
@@ -299,6 +304,24 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
     @Override
     public void OnTun2SocksHasMassage(V2rayConstants.CORE_STATES tun2SocksState, String newMessage) {
         Log.i("TUN2SOCKS", newMessage);
+    }
+
+    private V2rayConstants.SERVICE_COMMANDS resolveServiceCommand(Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        try {
+            Object cmd = intent.getSerializableExtra(V2RAY_SERVICE_COMMAND_EXTRA);
+            if (cmd instanceof V2rayConstants.SERVICE_COMMANDS) {
+                return (V2rayConstants.SERVICE_COMMANDS) cmd;
+            }
+            if (cmd instanceof String) {
+                return V2rayConstants.SERVICE_COMMANDS.valueOf(((String) cmd).replace(" ", "_"));
+            }
+        } catch (Exception e) {
+            Log.w(V2rayVPNService.class.getSimpleName(), "resolveServiceCommand", e);
+        }
+        return null;
     }
 
 }

@@ -64,9 +64,14 @@ V2rayController.stopV2ray(this);
 ```
 > you should call this function in main thread.
 
+## X-Core drop-in update guide
+- Replace the updated Java sources under `v2ray/src/main/java` and the sample `MainActivity` under `app/src/main/java` with the versions from this repository (all files include a `// Updated for X-Core` header).
+- Keep the bundled `libv2ray.aar` and native libraries under `v2ray/libs` in place; no Gradle dependency changes are required.
+- If Gradle warns about Java 21/source compatibility, set a toolchain of 17+ in `build.gradle` or via Android Studio settings; the code remains Java 8 compatible.
+- After copying, run `./gradlew :v2ray:assembleDebug` (or build from Android Studio). If the wrapper download is blocked by network policy, configure your environment’s proxy or preinstall Gradle 8.7.
+
 ## Credits
 - https://github.com/xtls/xray-core
 - https://github.com/2dust/AndroidLibXrayLite
 - https://github.com/gvcgo/vpnparser
-
 

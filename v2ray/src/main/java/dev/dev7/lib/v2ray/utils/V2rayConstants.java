@@ -1,3 +1,4 @@
+// Updated for X-Core
 package dev.dev7.lib.v2ray.utils;
 
 public class V2rayConstants {
@@ -20,6 +21,7 @@ public class V2rayConstants {
     public static final long KILO_BYTE = BYTE * 1024;
     public static final long MEGA_BYTE = KILO_BYTE * 1024;
     public static final long GIGA_BYTE = MEGA_BYTE * 1024;
+    public static final long TERA_BYTE = GIGA_BYTE * 1024;
 
     public enum SERVICE_MODES {
         VPN_MODE,
