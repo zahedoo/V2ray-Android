@@ -1,5 +1,7 @@
+// Updated for X-Core
 package dev.dev7.lib.v2ray.services;
 
+import static android.content.Context.RECEIVER_EXPORTED;
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.V2RAY_SERVICE_COMMAND_INTENT;
 
 import android.annotation.SuppressLint;
@@ -11,6 +13,7 @@ import android.content.IntentFilter;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
+
 import androidx.annotation.Nullable;
 
 import dev.dev7.lib.v2ray.core.V2rayCoreExecutor;
@@ -31,7 +34,7 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
         @Override
         public void onReceive(Context context, Intent intent) {
             try {
-                V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+                V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveServiceCommand(intent);
                 if (serviceCommand == null) {
                     return;
                 }
@@ -49,7 +52,8 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
                     default:
                         break;
                 }
-            }catch (Exception ignore){}
+            } catch (Exception ignore) {
+            }
         }
     };
 
@@ -98,7 +102,7 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
-            V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+            V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveServiceCommand(intent);
             if (serviceCommand == null) {
                 return super.onStartCommand(intent, flags, startId);
             }
@@ -112,6 +116,7 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
                         stopService();
                         break;
                     }
+                    connectionState = V2rayConstants.CONNECTION_STATES.CONNECTING;
                     staticsBroadCastService.isTrafficStaticsEnabled = currentConfig.enableTrafficStatics;
                     if (currentConfig.enableTrafficStatics && currentConfig.enableTrafficStaticsOnNotification) {
                         staticsBroadCastService.trafficListener = notificationService.trafficListener;
@@ -127,7 +132,8 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
                     onDestroy();
                     break;
             }
-        }catch (Exception ignore){}
+        } catch (Exception ignore) {
+        }
         return super.onStartCommand(intent, flags, startId);
     }
 
@@ -139,7 +145,10 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
 
     @Override
     public void onDestroy() {
-        unregisterReceiver(serviceCommandBroadcastReceiver);
+        try {
+            unregisterReceiver(serviceCommandBroadcastReceiver);
+        } catch (Exception ignore) {
+        }
         super.onDestroy();
     }
 
@@ -168,8 +177,27 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
             notificationService.dismissNotification();
             stopForeground(true);
             stopSelf();
+            connectionState = V2rayConstants.CONNECTION_STATES.DISCONNECTED;
         } catch (Exception e) {
             Log.d(V2rayProxyService.class.getSimpleName(), "stopService => ", e);
         }
+    }
+
+    private V2rayConstants.SERVICE_COMMANDS resolveServiceCommand(Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        try {
+            Object cmd = intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+            if (cmd instanceof V2rayConstants.SERVICE_COMMANDS) {
+                return (V2rayConstants.SERVICE_COMMANDS) cmd;
+            }
+            if (cmd instanceof String) {
+                return V2rayConstants.SERVICE_COMMANDS.valueOf(((String) cmd).replace(" ", "_"));
+            }
+        } catch (Exception e) {
+            Log.w(V2rayProxyService.class.getSimpleName(), "resolveServiceCommand", e);
+        }
+        return null;
     }
 }

@@ -1,3 +1,4 @@
+// Updated for X-Core
 package dev.dev7.lib.v2ray.services;
 
 import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
@@ -67,7 +68,7 @@ public class NotificationService {
         }
         Intent disconnectIntent = new Intent(targetService, targetService.getClass());
         disconnectIntent.setPackage(targetService.getPackageName());
-        disconnectIntent.putExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA, V2rayConstants.SERVICE_COMMANDS.STOP_SERVICE);
+        disconnectIntent.putExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA, V2rayConstants.SERVICE_COMMANDS.STOP_SERVICE.name());
         PendingIntent disconnectPendingIntent = PendingIntent.getService(targetService, 0, disconnectIntent, judgeForNotificationFlag());
         notifcationBuilder = new NotificationCompat.Builder(targetService, notificationChannelID);
         notifcationBuilder.setContentTitle(applicationName + " Connecting...")
