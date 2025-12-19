@@ -1,7 +1,9 @@
+/* Updated for X-Core */
 package dev.dev7.lib.v2ray.services;
 
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA;
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.V2RAY_SERVICE_COMMAND_INTENT;
+import static android.content.Context.RECEIVER_EXPORTED;
 
 import android.annotation.SuppressLint;
 import android.app.Service;
@@ -27,10 +29,9 @@ import dev.dev7.lib.v2ray.core.Tun2SocksExecutor;
 import dev.dev7.lib.v2ray.core.V2rayCoreExecutor;
 import dev.dev7.lib.v2ray.interfaces.StateListener;
 import dev.dev7.lib.v2ray.interfaces.Tun2SocksListener;
+import dev.dev7.lib.v2ray.interfaces.V2rayServicesListener;
 import dev.dev7.lib.v2ray.model.V2rayConfigModel;
 import dev.dev7.lib.v2ray.utils.V2rayConstants;
-
-import dev.dev7.lib.v2ray.interfaces.V2rayServicesListener;
 
 public class V2rayVPNService extends VpnService implements V2rayServicesListener, Tun2SocksListener {
     private ParcelFileDescriptor tunnelInterface;
@@ -42,20 +43,19 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
     private V2rayConfigModel currentConfig = new V2rayConfigModel();
     private boolean isServiceCreated = false;
     private boolean isServiceSetupStarted = false;
+    private boolean isStopping = false;
 
     private final BroadcastReceiver serviceCommandBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             try {
-                V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+                V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveCommand(intent);
                 if (serviceCommand == null) {
                     return;
                 }
                 switch (serviceCommand) {
                     case STOP_SERVICE:
-                        if (v2rayCoreExecutor != null) {
-                            v2rayCoreExecutor.stopCore(true);
-                        }
+                        stopCoreAndService();
                         break;
                     case MEASURE_DELAY:
                         if (v2rayCoreExecutor != null) {
@@ -69,7 +69,6 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
             }
         }
     };
-
 
     @Override
     public void onCreate() {
@@ -110,8 +109,6 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
                     }
                     return v2rayCoreExecutor.getUploadSpeed();
                 }
-
-
             });
             isServiceCreated = true;
         }
@@ -121,13 +118,13 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
-            V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2RAY_SERVICE_COMMAND_EXTRA);
+            V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveCommand(intent);
             if (serviceCommand == null) {
                 return super.onStartCommand(intent, flags, startId);
             }
             switch (serviceCommand) {
                 case STOP_SERVICE:
-                    v2rayCoreExecutor.stopCore(true);
+                    stopCoreAndService();
                     break;
                 case START_SERVICE:
                     currentConfig = (V2rayConfigModel) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_CONFIG_EXTRA);
@@ -139,6 +136,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
                     if (currentConfig.enableTrafficStatics && currentConfig.enableTrafficStaticsOnNotification) {
                         staticsBroadCastService.trafficListener = notificationService.trafficListener;
                     }
+                    connectionState = V2rayConstants.CONNECTION_STATES.CONNECTING;
                     v2rayCoreExecutor.startCore(currentConfig);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         registerReceiver(serviceCommandBroadcastReceiver, new IntentFilter(V2RAY_SERVICE_COMMAND_INTENT), RECEIVER_EXPORTED);
@@ -146,6 +144,11 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
                         registerReceiver(serviceCommandBroadcastReceiver, new IntentFilter(V2RAY_SERVICE_COMMAND_INTENT));
                     }
                     return START_STICKY;
+                case MEASURE_DELAY:
+                    if (v2rayCoreExecutor != null) {
+                        v2rayCoreExecutor.broadCastCurrentServerDelay();
+                    }
+                    break;
                 default:
                     onDestroy();
                     break;
@@ -172,19 +175,18 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
             }
         } catch (Exception ignore) {
         }
-        Intent prepare_intent = prepare(this);
-        if (prepare_intent != null) {
+        Intent prepareIntent = prepare(this);
+        if (prepareIntent != null) {
             return;
         }
         Builder builder = getBuilder();
         try {
-//            builder.addDisallowedApplication(getPackageName());
             tunnelInterface = builder.establish();
             int localDNSPort = 0;
-            if (currentConfig.enableLocalTunneledDNS){
+            if (currentConfig.enableLocalTunneledDNS) {
                 localDNSPort = currentConfig.localDNSPort;
             }
-            tun2SocksExecutor.run(this, currentConfig.localSocksPort,localDNSPort );
+            tun2SocksExecutor.run(this, currentConfig.localSocksPort, localDNSPort);
             sendFileDescriptor();
             if (tun2SocksExecutor.isTun2SucksRunning()) {
                 connectionState = V2rayConstants.CONNECTION_STATES.CONNECTED;
@@ -225,6 +227,9 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
     }
 
     private void sendFileDescriptor() {
+        if (tunnelInterface == null) {
+            return;
+        }
         String localSocksFile = new File(getApplicationContext().getFilesDir(), "sock_path").getAbsolutePath();
         FileDescriptor tunFd = tunnelInterface.getFileDescriptor();
         new Thread(() -> {
@@ -234,15 +239,9 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
                     Thread.sleep(50L * sendFDTries);
                     LocalSocket clientLocalSocket = new LocalSocket();
                     clientLocalSocket.connect(new LocalSocketAddress(localSocksFile, LocalSocketAddress.Namespace.FILESYSTEM));
-                    if (!clientLocalSocket.isConnected()) {
-                        Log.i("SOCK_FILE", "Unable to connect to localSocksFile [" + localSocksFile + "]");
-                    } else {
-                        Log.i("SOCK_FILE", "connected to sock file [" + localSocksFile + "]");
-                    }
                     OutputStream clientOutStream = clientLocalSocket.getOutputStream();
                     clientLocalSocket.setFileDescriptorsForSend(new FileDescriptor[]{tunFd});
                     clientOutStream.write(42);
-//                    clientLocalSocket.setFileDescriptorsForSend(null);
                     clientLocalSocket.shutdownOutput();
                     clientLocalSocket.close();
                     isSendFDSuccess = true;
@@ -258,7 +257,10 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
 
     @Override
     public void onDestroy() {
-        unregisterReceiver(serviceCommandBroadcastReceiver);
+        try {
+            unregisterReceiver(serviceCommandBroadcastReceiver);
+        } catch (Exception ignore) {
+        }
         super.onDestroy();
     }
 
@@ -279,21 +281,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
 
     @Override
     public void stopService() {
-        try {
-            staticsBroadCastService.sendDisconnectedBroadCast(this);
-            tun2SocksExecutor.stopTun2Socks();
-            staticsBroadCastService.stop();
-            notificationService.dismissNotification();
-            stopForeground(true);
-            stopSelf();
-            try {
-                tunnelInterface.close();
-            } catch (Exception ignore) {
-
-            }
-        } catch (Exception e) {
-            Log.d(V2rayVPNService.class.getSimpleName(), "stopService => ", e);
-        }
+        shutdownService();
     }
 
     @Override
@@ -301,4 +289,75 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
         Log.i("TUN2SOCKS", newMessage);
     }
 
+    private void stopCoreAndService() {
+        shutdownService();
+    }
+
+    private void shutdownService() {
+        if (isStopping) {
+            return;
+        }
+        isStopping = true;
+        try {
+            staticsBroadCastService.sendDisconnectedBroadCast(this);
+        } catch (Exception ignore) {
+        }
+        try {
+            tun2SocksExecutor.stopTun2Socks();
+        } catch (Exception e) {
+            Log.w(V2rayVPNService.class.getSimpleName(), "shutdownService tun2socks", e);
+        }
+        try {
+            if (v2rayCoreExecutor != null) {
+                v2rayCoreExecutor.stopCore(false);
+            }
+        } catch (Exception e) {
+            Log.w(V2rayVPNService.class.getSimpleName(), "shutdownService core", e);
+        }
+        try {
+            staticsBroadCastService.stop();
+            notificationService.dismissNotification();
+        } catch (Exception ignore) {
+        }
+        try {
+            stopForeground(true);
+        } catch (Exception ignore) {
+        }
+        try {
+            stopSelf();
+        } catch (Exception ignore) {
+        }
+        try {
+            if (tunnelInterface != null) {
+                tunnelInterface.close();
+                tunnelInterface = null;
+            }
+        } catch (Exception ignore) {
+        }
+        connectionState = V2rayConstants.CONNECTION_STATES.DISCONNECTED;
+        isServiceSetupStarted = false;
+        isStopping = false;
+    }
+
+    private V2rayConstants.SERVICE_COMMANDS resolveCommand(Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        Object extra = intent.getSerializableExtra(V2RAY_SERVICE_COMMAND_EXTRA);
+        if (extra instanceof V2rayConstants.SERVICE_COMMANDS) {
+            return (V2rayConstants.SERVICE_COMMANDS) extra;
+        }
+        String commandStr = intent.getStringExtra("command");
+        if (commandStr == null && extra instanceof String) {
+            commandStr = (String) extra;
+        }
+        if (commandStr != null) {
+            try {
+                return V2rayConstants.SERVICE_COMMANDS.valueOf(commandStr);
+            } catch (Exception ignore) {
+                return null;
+            }
+        }
+        return null;
+    }
 }

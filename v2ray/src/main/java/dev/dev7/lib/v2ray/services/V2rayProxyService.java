@@ -1,6 +1,8 @@
+/* Updated for X-Core */
 package dev.dev7.lib.v2ray.services;
 
 import static dev.dev7.lib.v2ray.utils.V2rayConstants.V2RAY_SERVICE_COMMAND_INTENT;
+import static android.content.Context.RECEIVER_EXPORTED;
 
 import android.annotation.SuppressLint;
 import android.app.Service;
@@ -11,6 +13,7 @@ import android.content.IntentFilter;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
+
 import androidx.annotation.Nullable;
 
 import dev.dev7.lib.v2ray.core.V2rayCoreExecutor;
@@ -26,20 +29,19 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
     private V2rayConstants.CONNECTION_STATES connectionState = V2rayConstants.CONNECTION_STATES.DISCONNECTED;
     private V2rayConfigModel currentConfig = new V2rayConfigModel();
     private boolean isServiceCreated = false;
+    private boolean isStopping = false;
 
     private final BroadcastReceiver serviceCommandBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             try {
-                V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+                V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveCommand(intent);
                 if (serviceCommand == null) {
                     return;
                 }
                 switch (serviceCommand) {
                     case STOP_SERVICE:
-                        if (v2rayCoreExecutor != null) {
-                            v2rayCoreExecutor.stopCore(true);
-                        }
+                        stopCoreAndService();
                         break;
                     case MEASURE_DELAY:
                         if (v2rayCoreExecutor != null) {
@@ -49,7 +51,8 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
                     default:
                         break;
                 }
-            }catch (Exception ignore){}
+            } catch (Exception ignore) {
+            }
         }
     };
 
@@ -98,13 +101,13 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
-            V2rayConstants.SERVICE_COMMANDS serviceCommand = (V2rayConstants.SERVICE_COMMANDS) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+            V2rayConstants.SERVICE_COMMANDS serviceCommand = resolveCommand(intent);
             if (serviceCommand == null) {
                 return super.onStartCommand(intent, flags, startId);
             }
             switch (serviceCommand) {
                 case STOP_SERVICE:
-                    v2rayCoreExecutor.stopCore(true);
+                    stopCoreAndService();
                     break;
                 case START_SERVICE:
                     currentConfig = (V2rayConfigModel) intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_CONFIG_EXTRA);
@@ -116,6 +119,7 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
                     if (currentConfig.enableTrafficStatics && currentConfig.enableTrafficStaticsOnNotification) {
                         staticsBroadCastService.trafficListener = notificationService.trafficListener;
                     }
+                    connectionState = V2rayConstants.CONNECTION_STATES.CONNECTING;
                     v2rayCoreExecutor.startCore(currentConfig);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         registerReceiver(serviceCommandBroadcastReceiver, new IntentFilter(V2RAY_SERVICE_COMMAND_INTENT), RECEIVER_EXPORTED);
@@ -123,11 +127,17 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
                         registerReceiver(serviceCommandBroadcastReceiver, new IntentFilter(V2RAY_SERVICE_COMMAND_INTENT));
                     }
                     return START_STICKY;
+                case MEASURE_DELAY:
+                    if (v2rayCoreExecutor != null) {
+                        v2rayCoreExecutor.broadCastCurrentServerDelay();
+                    }
+                    break;
                 default:
                     onDestroy();
                     break;
             }
-        }catch (Exception ignore){}
+        } catch (Exception ignore) {
+        }
         return super.onStartCommand(intent, flags, startId);
     }
 
@@ -139,7 +149,10 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
 
     @Override
     public void onDestroy() {
-        unregisterReceiver(serviceCommandBroadcastReceiver);
+        try {
+            unregisterReceiver(serviceCommandBroadcastReceiver);
+        } catch (Exception ignore) {
+        }
         super.onDestroy();
     }
 
@@ -162,14 +175,65 @@ public class V2rayProxyService extends Service implements V2rayServicesListener 
 
     @Override
     public void stopService() {
+        shutdownService();
+    }
+
+    private void stopCoreAndService() {
+        shutdownService();
+    }
+
+    private void shutdownService() {
+        if (isStopping) {
+            return;
+        }
+        isStopping = true;
         try {
             staticsBroadCastService.sendDisconnectedBroadCast(this);
-            staticsBroadCastService.stop();
-            notificationService.dismissNotification();
-            stopForeground(true);
-            stopSelf();
+        } catch (Exception ignore) {
+        }
+        try {
+            if (v2rayCoreExecutor != null) {
+                v2rayCoreExecutor.stopCore(false);
+            }
         } catch (Exception e) {
             Log.d(V2rayProxyService.class.getSimpleName(), "stopService => ", e);
         }
+        try {
+            staticsBroadCastService.stop();
+            notificationService.dismissNotification();
+        } catch (Exception ignore) {
+        }
+        try {
+            stopForeground(true);
+        } catch (Exception ignore) {
+        }
+        try {
+            stopSelf();
+        } catch (Exception ignore) {
+        }
+        connectionState = V2rayConstants.CONNECTION_STATES.DISCONNECTED;
+        isStopping = false;
+    }
+
+    private V2rayConstants.SERVICE_COMMANDS resolveCommand(Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        Object extra = intent.getSerializableExtra(V2rayConstants.V2RAY_SERVICE_COMMAND_EXTRA);
+        if (extra instanceof V2rayConstants.SERVICE_COMMANDS) {
+            return (V2rayConstants.SERVICE_COMMANDS) extra;
+        }
+        String commandStr = intent.getStringExtra("command");
+        if (commandStr == null && extra instanceof String) {
+            commandStr = (String) extra;
+        }
+        if (commandStr != null) {
+            try {
+                return V2rayConstants.SERVICE_COMMANDS.valueOf(commandStr);
+            } catch (Exception ignore) {
+                return null;
+            }
+        }
+        return null;
     }
 }

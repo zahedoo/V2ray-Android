@@ -1,3 +1,4 @@
+/* Updated for X-Core */
 package dev.dev7.lib.v2ray.services;
 
 import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
@@ -106,7 +107,7 @@ public class NotificationService {
     public void setConnectedNotification(String remark, int iconResource) {
         if (mNotificationManager != null && notifcationBuilder != null) {
             if (isNotificationOnGoing) {
-                notifcationBuilder.setSmallIcon(iconResource);
+                notifcationBuilder.setSmallIcon(iconResource == 0 ? android.R.drawable.sym_def_app_icon : iconResource);
                 notifcationBuilder.setContentTitle("Connected to " + remark);
                 notifcationBuilder.setContentText("Application connected successfully.\nTap to open Application.");
                 mNotificationManager.notify(NOTIFICATION_ID, notifcationBuilder.build());
