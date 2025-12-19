@@ -64,9 +64,13 @@ V2rayController.stopV2ray(this);
 ```
 > you should call this function in main thread.
 
+## X-Core update quick replace
+- Copy the updated Java sources from `v2ray/src/main/java/dev/dev7/lib/v2ray/` and `app/src/main/java/dev/dev7/example/` into the matching module paths of your project to replace earlier drop-ins.
+- Keep `v2ray/libs/libv2ray.aar` available via the `flatDir` repository so the gomobile bindings resolve.
+- When building with JDK 21, you may see source/target warnings; set a Gradle Java toolchain to 17+ (for example `java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }`) to silence them while staying Java 8 compatible.
+
 ## Credits
 - https://github.com/xtls/xray-core
 - https://github.com/2dust/AndroidLibXrayLite
 - https://github.com/gvcgo/vpnparser
-
 

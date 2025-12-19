@@ -1,3 +1,4 @@
+/* Updated for X-Core */
 package dev.dev7.lib.v2ray.core;
 
 import android.content.Context;
